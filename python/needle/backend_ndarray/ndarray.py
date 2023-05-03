@@ -1,3 +1,4 @@
+from itertools import accumulate, islice
 import operator
 import math
 from functools import reduce
@@ -226,7 +227,7 @@ class NDArray:
     def flat(self):
         return self.reshape((self.size,))
 
-    def reshape(self, new_shape):
+    def reshape(self, new_shape:tuple[int]):
         """
         Reshape the matrix without copying memory.  This will return a matrix
         that corresponds to a reshaped array but points to the same memory as
@@ -241,7 +242,13 @@ class NDArray:
         """
 
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        mul = lambda a, b: a *b
+        totalSize = reduce(mul, self.shape, 1)
+        if reduce(mul, new_shape, 1) != totalSize:
+            raise ValueError()
+        
+        strides = tuple(islice(accumulate(new_shape, func = lambda a, b: a//b, initial = totalSize), 1, len(new_shape) + 1))
+        return NDArray.make(shape=new_shape, strides = strides, device=self.device, handle = self._handle, offset=self._offset)
         ### END YOUR SOLUTION
 
     def permute(self, new_axes):
@@ -264,7 +271,9 @@ class NDArray:
         """
 
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        new_shape = tuple(self.shape[axis] for axis in new_axes)
+        new_strides = tuple(self.strides[axis] for axis in new_axes)
+        return NDArray.make(new_shape, new_strides, self.device, self._handle, self._offset)
         ### END YOUR SOLUTION
 
     def broadcast_to(self, new_shape):
@@ -285,12 +294,16 @@ class NDArray:
         """
 
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        assert all(oldAxis == 1 or newAxis == oldAxis for newAxis, oldAxis in zip(new_shape, self.shape))
+        newStrides = tuple(stride if oldAxis == newAxis else 0 
+                           for stride, oldAxis, newAxis 
+                           in zip(self.strides, self.shape, new_shape))
+        return NDArray.make(shape=new_shape, strides=newStrides, device = self.device, handle = self._handle, offset=self._offset)
         ### END YOUR SOLUTION
 
     ### Get and set elements
 
-    def process_slice(self, sl, dim):
+    def process_slice(self, sl:slice, dim:int):
         """ Convert a slice to an explicit start/stop/step """
         start, stop, step = sl.start, sl.stop, sl.step
         if start == None:
@@ -348,7 +361,10 @@ class NDArray:
         assert len(idxs) == self.ndim, "Need indexes equal to number of dimensions"
 
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        newShape = tuple((idx.stop - idx.start)//idx.step for idx in idxs)
+        newStride = tuple(idx.step * stride for idx, stride in zip(idxs, self.strides))
+        offset = sum(idx.start * stride for idx, stride in zip(idxs, self.strides))
+        return NDArray.make(shape=newShape, strides = newStride, device = self.device, handle=self._handle, offset=offset)
         ### END YOUR SOLUTION
 
     def __setitem__(self, idxs, other):
