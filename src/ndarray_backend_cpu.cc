@@ -17,9 +17,9 @@ namespace needle
     const size_t ELEM_SIZE = sizeof(scalar_t);
 
     /**
-     * This is a utility structure for maintaining an array aligned to ALIGNMENT boundaries in
-     * memory.  This alignment should be at least TILE * ELEM_SIZE, though we make it even larger
-     * here by default.
+     * This is a utility structure for maintaining an array aligned to ALIGNMENT
+     * boundaries in memory.  This alignment should be at least TILE * ELEM_SIZE,
+     * though we make it even larger here by default.
      */
     struct AlignedArray
     {
@@ -47,46 +47,66 @@ namespace needle
       }
     }
 
-    void Compact(const AlignedArray &a, AlignedArray *out, std::vector<uint32_t> shape,
-                 std::vector<uint32_t> strides, size_t offset)
+    std::vector<int>
+    convertCompactIndToStrided(const std::vector<uint32_t> &shape,
+                               const std::vector<uint32_t> &strides,
+                               const int offset)
+    {
+      std::vector<int> rCumulativeProduct(shape.size());
+      rCumulativeProduct.back() = 1;
+      std::partial_sum(shape.rbegin(), prev(shape.rend()),
+                       next(rCumulativeProduct.rbegin()), std::multiplies<int>());
+      int totalSize = rCumulativeProduct[0] * shape[0];
+
+      std::vector<int> lookupVector(totalSize);
+      for (int compactInd = 0; compactInd < totalSize; ++compactInd)
+      {
+        int stridedInd = offset;
+        int temp = compactInd;
+        for (int strideInd = 0; strideInd < strides.size(); ++strideInd)
+        {
+          auto ans = std::div(temp, rCumulativeProduct[strideInd]);
+          temp = ans.rem;
+          stridedInd += strides[strideInd] * ans.quot;
+        }
+        lookupVector[compactInd] = stridedInd;
+      }
+
+      return lookupVector;
+    }
+
+    void Compact(const AlignedArray &a, AlignedArray *out,
+                 std::vector<uint32_t> shape, std::vector<uint32_t> strides,
+                 size_t offset)
     {
       /**
        * Compact an array in memory
        *
        * Args:
        *   a: non-compact representation of the array, given as input
-       *   out: compact version of the array to be written
+       *   out:          version of the array to be written
        *   shape: shapes of each dimension for a and out
        *   strides: strides of the *a* array (not out, which has compact strides)
-       *   offset: offset of the *a* array (not out, which has zero offset, being compact)
+       *   offset: offset of the *a* array (not out, which has zero offset, being
+       * compact)
        *
        * Returns:
-       *  void (you need to modify out directly, rather than returning anything; this is true for all the
-       *  function will implement here, so we won't repeat this note.)
+       *  void (you need to modify out directly, rather than returning anything;
+       * this is true for all the function will implement here, so we won't repeat
+       * this note.)
        */
       /// BEGIN YOUR SOLUTION
-      std::vector<int> rCumulativeProduct(shape.size());
-      rCumulativeProduct.back() = 1;
-      std::partial_sum(shape.rbegin(), prev(shape.rend()), next(rCumulativeProduct.rbegin()), std::multiplies<int>());
-
-      int totalSize = rCumulativeProduct[0] * shape[0];
-      for (int ind = 0; ind < totalSize; ++ind)
+      std::vector<int> lookup = convertCompactIndToStrided(shape, strides, offset);
+      for (int compactInd = 0; compactInd < lookup.size(); compactInd++)
       {
-        int oldIndex = offset;
-        int indCopied = ind;
-        for (int strideInd = 0; strideInd < strides.size(); ++strideInd)
-        {
-          auto ans = std::div(indCopied, rCumulativeProduct[strideInd]);
-          indCopied = ans.rem;
-          oldIndex += strides[strideInd] * ans.quot;
-        }
-        out->ptr[ind] = a.ptr[oldIndex];
+        out->ptr[compactInd] = a.ptr[lookup[compactInd]];
       }
-      /// END YOUR SOLUTION
     }
+    /// END YOUR SOLUTION
 
-    void EwiseSetitem(const AlignedArray &a, AlignedArray *out, std::vector<uint32_t> shape,
-                      std::vector<uint32_t> strides, size_t offset)
+    void EwiseSetitem(const AlignedArray &a, AlignedArray *out,
+                      std::vector<uint32_t> shape, std::vector<uint32_t> strides,
+                      size_t offset)
     {
       /**
        * Set items in a (non-compact) array
@@ -96,48 +116,41 @@ namespace needle
        *   out: non-compact array whose items are to be written
        *   shape: shapes of each dimension for a and out
        *   strides: strides of the *out* array (not a, which has compact strides)
-       *   offset: offset of the *out* array (not a, which has zero offset, being compact)
+       *   offset: offset of the *out* array (not a, which has zero offset, being
+       * compact)
        */
       /// BEGIN YOUR SOLUTION
-
+      std::vector<int> lookup = convertCompactIndToStrided(shape, strides, offset);
+      for (int compactInd = 0; compactInd < lookup.size(); ++compactInd)
+      {
+        out->ptr[lookup[compactInd]] = a.ptr[compactInd];
+      }
       /// END YOUR SOLUTION
     }
 
-    void ScalarSetitem(const size_t size, scalar_t val, AlignedArray *out, std::vector<uint32_t> shape,
-                       std::vector<uint32_t> strides, size_t offset)
+    void ScalarSetitem(const size_t size, scalar_t val, AlignedArray *out,
+                       std::vector<uint32_t> shape, std::vector<uint32_t> strides,
+                       size_t offset)
     {
       /**
        * Set items is a (non-compact) array
        *
        * Args:
-       *   size: number of elements to write in out array (note that this will note be the same as
-       *         out.size, because out is a non-compact subset array);  it _will_ be the same as the
-       *         product of items in shape, but convenient to just pass it here.
-       *   val: scalar value to write to
-       *   out: non-compact array whose items` are to be written
-       *   shape: shapes of each dimension of out
-       *   strides: strides of the out array
-       *   offset: offset of the out array
+       *   size: number of elements to write in out array (note that this will note
+       * be the same as out.size, because out is a non-compact subset array);  it
+       * _will_ be the same as the product of items in shape, but convenient to just
+       * pass it here. val: scalar value to write to out: non-compact array whose
+       * items` are to be written shape: shapes of each dimension of out strides:
+       * strides of the out array offset: offset of the out array
        */
 
       /// BEGIN YOUR SOLUTION
-      std::vector<int> rCumulativeProduct(shape.size());
-      rCumulativeProduct.back() = 1;
-      std::partial_sum(shape.rbegin(), prev(shape.rend()), next(rCumulativeProduct.rbegin()), std::multiplies<int>());
-      int totalSize = rCumulativeProduct[0] * shape[0];
-      for (int ind = 0; ind < totalSize; ++ind)
+      std::vector<int> lookup = convertCompactIndToStrided(shape, strides, offset);
+      for (int stridedInd : lookup)
       {
-        int oldIndex = offset;
-        int indCopied = ind;
-        for (int strideInd = 0; strideInd < strides.size(); ++strideInd)
-        {
-          auto ans = std::div(indCopied, rCumulativeProduct[strideInd]);
-          indCopied = ans.rem;
-          oldIndex += strides[strideInd] * ans.quot;
-        }
-        out->ptr[oldIndex] = val;
-        /// END YOUR SOLUTION
+        out->ptr[stridedInd] = val;
       }
+      /// END YOUR SOLUTION
     }
 
     void EwiseAdd(const AlignedArray &a, const AlignedArray &b, AlignedArray *out)
@@ -154,7 +167,8 @@ namespace needle
     void ScalarAdd(const AlignedArray &a, scalar_t val, AlignedArray *out)
     {
       /**
-       * Set entries in out to be the sum of corresponding entry in a plus the scalar val.
+       * Set entries in out to be the sum of corresponding entry in a plus the
+       * scalar val.
        */
       for (size_t i = 0; i < a.size; i++)
       {
@@ -163,9 +177,9 @@ namespace needle
     }
 
     /**
-     * In the code the follows, use the above template to create analogous element-wise
-     * and and scalar operators for the following functions.  See the numpy backend for
-     * examples of how they should work.
+     * In the code the follows, use the above template to create analogous
+     * element-wise and and scalar operators for the following functions.  See the
+     * numpy backend for examples of how they should work.
      *   - EwiseMul, ScalarMul
      *   - EwiseDiv, ScalarDiv
      *   - ScalarPower
@@ -177,21 +191,21 @@ namespace needle
      *   - EwiseTanh
      *
      * If you implement all these naively, there will be a lot of repeated code, so
-     * you are welcome (but not required), to use macros or templates to define these
-     * functions (however you want to do so, as long as the functions match the proper)
-     * signatures above.
+     * you are welcome (but not required), to use macros or templates to define
+     * these functions (however you want to do so, as long as the functions match
+     * the proper) signatures above.
      */
 
     /// BEGIN YOUR SOLUTION
 
     /// END YOUR SOLUTION
 
-    void Matmul(const AlignedArray &a, const AlignedArray &b, AlignedArray *out, uint32_t m, uint32_t n,
-                uint32_t p)
+    void Matmul(const AlignedArray &a, const AlignedArray &b, AlignedArray *out,
+                uint32_t m, uint32_t n, uint32_t p)
     {
       /**
-       * Multiply two (compact) matrices into an output (also compact) matrix.  For this implementation
-       * you can use the "naive" three-loop algorithm.
+       * Multiply two (compact) matrices into an output (also compact) matrix.  For
+       * this implementation you can use the "naive" three-loop algorithm.
        *
        * Args:
        *   a: compact 2D array of size m x n
@@ -207,21 +221,22 @@ namespace needle
       /// END YOUR SOLUTION
     }
 
-    inline void AlignedDot(const float *__restrict__ a,
-                           const float *__restrict__ b,
+    inline void AlignedDot(const float *__restrict__ a, const float *__restrict__ b,
                            float *__restrict__ out)
     {
 
       /**
-       * Multiply together two TILE x TILE matrices, and _add _the result to out (it is important to add
-       * the result to the existing out, which you should not set to zero beforehand).  We are including
-       * the compiler flags here that enable the compile to properly use vector operators to implement
-       * this function.  Specifically, the __restrict__ keyword indicates to the compile that a, b, and
-       * out don't have any overlapping memory (which is necessary in order for vector operations to be
-       * equivalent to their non-vectorized counterparts (imagine what could happen otherwise if a, b,
-       * and out had overlapping memory).  Similarly the __builtin_assume_aligned keyword tells the
-       * compiler that the input array will be aligned to the appropriate blocks in memory, which also
-       * helps the compiler vectorize the code.
+       * Multiply together two TILE x TILE matrices, and _add _the result to out (it
+       * is important to add the result to the existing out, which you should not
+       * set to zero beforehand).  We are including the compiler flags here that
+       * enable the compile to properly use vector operators to implement this
+       * function.  Specifically, the __restrict__ keyword indicates to the compile
+       * that a, b, and out don't have any overlapping memory (which is necessary in
+       * order for vector operations to be equivalent to their non-vectorized
+       * counterparts (imagine what could happen otherwise if a, b, and out had
+       * overlapping memory).  Similarly the __builtin_assume_aligned keyword tells
+       * the compiler that the input array will be aligned to the appropriate blocks
+       * in memory, which also helps the compiler vectorize the code.
        *
        * Args:
        *   a: compact 2D array of size TILE x TILE
@@ -238,18 +253,19 @@ namespace needle
       /// END YOUR SOLUTION
     }
 
-    void MatmulTiled(const AlignedArray &a, const AlignedArray &b, AlignedArray *out, uint32_t m,
-                     uint32_t n, uint32_t p)
+    void MatmulTiled(const AlignedArray &a, const AlignedArray &b,
+                     AlignedArray *out, uint32_t m, uint32_t n, uint32_t p)
     {
       /**
-       * Matrix multiplication on tiled representations of array.  In this setting, a, b, and out
-       * are all *4D* compact arrays of the appropriate size, e.g. a is an array of size
-       *   a[m/TILE][n/TILE][TILE][TILE]
-       * You should do the multiplication tile-by-tile to improve performance of the array (i.e., this
+       * Matrix multiplication on tiled representations of array.  In this setting,
+       * a, b, and out are all *4D* compact arrays of the appropriate size, e.g. a
+       * is an array of size a[m/TILE][n/TILE][TILE][TILE] You should do the
+       * multiplication tile-by-tile to improve performance of the array (i.e., this
        * function should call `AlignedDot()` implemented above).
        *
-       * Note that this function will only be called when m, n, p are all multiples of TILE, so you can
-       * assume that this division happens without any remainder.
+       * Note that this function will only be called when m, n, p are all multiples
+       * of TILE, so you can assume that this division happens without any
+       * remainder.
        *
        * Args:
        *   a: compact 4D array of size m/TILE x n/TILE x TILE x TILE
@@ -320,8 +336,9 @@ PYBIND11_MODULE(ndarray_backend_cpu, m)
                        std::vector<size_t> strides, size_t offset)
         {
     std::vector<size_t> numpy_strides = strides;
-    std::transform(numpy_strides.begin(), numpy_strides.end(), numpy_strides.begin(),
-                   [](size_t& c) { return c * ELEM_SIZE; });
+    std::transform(numpy_strides.begin(), numpy_strides.end(),
+                   numpy_strides.begin(),
+                   [](size_t &c) { return c * ELEM_SIZE; });
     return py::array_t<scalar_t>(shape, numpy_strides, a.ptr + offset); });
 
   // convert from numpy (with copying)
